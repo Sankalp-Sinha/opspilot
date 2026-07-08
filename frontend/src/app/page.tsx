@@ -6,43 +6,136 @@ import {
   useState,
 } from "react";
 
+import IncidentAnalysisPanel from "@/components/incident-analysis-panel";
+
 import {
+  analyzeIncident,
   createIncident,
   createWorkspace,
+  getIncidentAnalyses,
   getIncidents,
   getWorkspaces,
 } from "@/lib/api";
 
 import type {
   Incident,
+  IncidentAnalysis,
   Workspace,
 } from "@/types";
 
 
-export default function Home() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+type LatestAnalyses = Record<
+  string,
+  IncidentAnalysis | null
+>;
 
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceSlug, setWorkspaceSlug] = useState("");
+
+export default function Home() {
+  const [
+    workspaces,
+    setWorkspaces,
+  ] = useState<Workspace[]>([]);
+
+  const [
+    incidents,
+    setIncidents,
+  ] = useState<Incident[]>([]);
+
+
+  const [
+    latestAnalyses,
+    setLatestAnalyses,
+  ] = useState<LatestAnalyses>({});
+
+
+  const [
+    workspaceName,
+    setWorkspaceName,
+  ] = useState("");
+
+  const [
+    workspaceSlug,
+    setWorkspaceSlug,
+  ] = useState("");
+
 
   const [
     selectedWorkspaceId,
     setSelectedWorkspaceId,
   ] = useState("");
 
-  const [incidentTitle, setIncidentTitle] = useState("");
+
+  const [
+    incidentTitle,
+    setIncidentTitle,
+  ] = useState("");
+
   const [
     incidentDescription,
     setIncidentDescription,
   ] = useState("");
-  const [serviceName, setServiceName] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [
+    serviceName,
+    setServiceName,
+  ] = useState("");
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    submitting,
+    setSubmitting,
+  ] = useState(false);
+
+  const [
+    analyzingIncidentId,
+    setAnalyzingIncidentId,
+  ] = useState<string | null>(null);
+
+
+  const [
+    message,
+    setMessage,
+  ] = useState("");
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+
+  async function loadLatestAnalyses(
+    incidentData: Incident[]
+  ) {
+    const entries = await Promise.all(
+      incidentData.map(async (incident) => {
+        try {
+          const analyses =
+            await getIncidentAnalyses(
+              incident.id
+            );
+
+          return [
+            incident.id,
+            analyses[0] ?? null,
+          ] as const;
+        } catch {
+          return [
+            incident.id,
+            null,
+          ] as const;
+        }
+      })
+    );
+
+    setLatestAnalyses(
+      Object.fromEntries(entries)
+    );
+  }
 
 
   async function loadData() {
@@ -68,6 +161,10 @@ export default function Home() {
           workspaceData[0].id
         );
       }
+
+      await loadLatestAnalyses(
+        incidentData
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -95,22 +192,27 @@ export default function Home() {
       setError("");
       setMessage("");
 
-      const workspace = await createWorkspace({
-        name: workspaceName,
-        slug: workspaceSlug,
-      });
+      const workspace =
+        await createWorkspace({
+          name: workspaceName,
+          slug: workspaceSlug,
+        });
 
       setWorkspaces((current) => [
         workspace,
         ...current,
       ]);
 
-      setSelectedWorkspaceId(workspace.id);
+      setSelectedWorkspaceId(
+        workspace.id
+      );
 
       setWorkspaceName("");
       setWorkspaceSlug("");
 
-      setMessage("Workspace created successfully.");
+      setMessage(
+        "Workspace created successfully."
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -129,7 +231,9 @@ export default function Home() {
     event.preventDefault();
 
     if (!selectedWorkspaceId) {
-      setError("Create or select a workspace first.");
+      setError(
+        "Create or select a workspace first."
+      );
       return;
     }
 
@@ -138,23 +242,38 @@ export default function Home() {
       setError("");
       setMessage("");
 
-      const incident = await createIncident({
-        workspace_id: selectedWorkspaceId,
-        title: incidentTitle,
-        description: incidentDescription,
-        service_name: serviceName || null,
-      });
+      const incident =
+        await createIncident({
+          workspace_id:
+            selectedWorkspaceId,
+
+          title:
+            incidentTitle,
+
+          description:
+            incidentDescription,
+
+          service_name:
+            serviceName || null,
+        });
 
       setIncidents((current) => [
         incident,
         ...current,
       ]);
 
+      setLatestAnalyses((current) => ({
+        ...current,
+        [incident.id]: null,
+      }));
+
       setIncidentTitle("");
       setIncidentDescription("");
       setServiceName("");
 
-      setMessage("Incident created successfully.");
+      setMessage(
+        "Incident created successfully."
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -163,6 +282,42 @@ export default function Home() {
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+
+  async function handleAnalyzeIncident(
+    incidentId: string
+  ) {
+    try {
+      setAnalyzingIncidentId(
+        incidentId
+      );
+
+      setError("");
+      setMessage("");
+
+      const analysis =
+        await analyzeIncident(
+          incidentId
+        );
+
+      setLatestAnalyses((current) => ({
+        ...current,
+        [incidentId]: analysis,
+      }));
+
+      setMessage(
+        "AI analysis completed successfully."
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to analyze incident"
+      );
+    } finally {
+      setAnalyzingIncidentId(null);
     }
   }
 
@@ -180,9 +335,9 @@ export default function Home() {
           </h1>
 
           <p className="mt-3 max-w-2xl text-slate-400">
-            Create operational incidents now. Later,
-            our AI agent will investigate them using
-            metrics, logs, deployments, and runbooks.
+            Create operational incidents and
+            perform structured AI-assisted
+            triage using Gemini.
           </p>
         </header>
 
@@ -212,6 +367,7 @@ export default function Home() {
             </p>
           </div>
 
+
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-sm text-slate-400">
               Incidents
@@ -221,6 +377,7 @@ export default function Home() {
               {incidents.length}
             </p>
           </div>
+
 
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-sm text-slate-400">
@@ -236,7 +393,9 @@ export default function Home() {
 
         <section className="grid gap-8 lg:grid-cols-2">
           <form
-            onSubmit={handleCreateWorkspace}
+            onSubmit={
+              handleCreateWorkspace
+            }
             className="rounded-xl border border-slate-800 bg-slate-900 p-6"
           >
             <h2 className="text-xl font-semibold">
@@ -244,14 +403,17 @@ export default function Home() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-400">
-              A workspace represents one company or tenant.
+              A workspace represents one
+              company or tenant.
             </p>
 
             <div className="mt-6 space-y-4">
               <input
                 value={workspaceName}
                 onChange={(event) =>
-                  setWorkspaceName(event.target.value)
+                  setWorkspaceName(
+                    event.target.value
+                  )
                 }
                 placeholder="Workspace name"
                 required
@@ -262,7 +424,9 @@ export default function Home() {
               <input
                 value={workspaceSlug}
                 onChange={(event) =>
-                  setWorkspaceSlug(event.target.value)
+                  setWorkspaceSlug(
+                    event.target.value
+                  )
                 }
                 placeholder="workspace-slug"
                 required
@@ -274,7 +438,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full rounded-lg bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
+                className="w-full rounded-lg bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Create Workspace
               </button>
@@ -283,7 +447,9 @@ export default function Home() {
 
 
           <form
-            onSubmit={handleCreateIncident}
+            onSubmit={
+              handleCreateIncident
+            }
             className="rounded-xl border border-slate-800 bg-slate-900 p-6"
           >
             <h2 className="text-xl font-semibold">
@@ -291,13 +457,15 @@ export default function Home() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-400">
-              This is the operational problem our future
-              agent will investigate.
+              This is the operational problem
+              our future agent will investigate.
             </p>
 
             <div className="mt-6 space-y-4">
               <select
-                value={selectedWorkspaceId}
+                value={
+                  selectedWorkspaceId
+                }
                 onChange={(event) =>
                   setSelectedWorkspaceId(
                     event.target.value
@@ -310,20 +478,25 @@ export default function Home() {
                   Select workspace
                 </option>
 
-                {workspaces.map((workspace) => (
-                  <option
-                    key={workspace.id}
-                    value={workspace.id}
-                  >
-                    {workspace.name}
-                  </option>
-                ))}
+                {workspaces.map(
+                  (workspace) => (
+                    <option
+                      key={workspace.id}
+                      value={workspace.id}
+                    >
+                      {workspace.name}
+                    </option>
+                  )
+                )}
               </select>
+
 
               <input
                 value={incidentTitle}
                 onChange={(event) =>
-                  setIncidentTitle(event.target.value)
+                  setIncidentTitle(
+                    event.target.value
+                  )
                 }
                 placeholder="Incident title"
                 required
@@ -331,17 +504,23 @@ export default function Home() {
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-cyan-500"
               />
 
+
               <input
                 value={serviceName}
                 onChange={(event) =>
-                  setServiceName(event.target.value)
+                  setServiceName(
+                    event.target.value
+                  )
                 }
                 placeholder="Service name, e.g. checkout-service"
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-cyan-500"
               />
 
+
               <textarea
-                value={incidentDescription}
+                value={
+                  incidentDescription
+                }
                 onChange={(event) =>
                   setIncidentDescription(
                     event.target.value
@@ -354,10 +533,11 @@ export default function Home() {
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-cyan-500"
               />
 
+
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full rounded-lg bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
+                className="w-full rounded-lg bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Create Incident
               </button>
@@ -367,17 +547,17 @@ export default function Home() {
 
 
         <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-6">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                Recent Incidents
-              </h2>
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold">
+              Recent Incidents
+            </h2>
 
-              <p className="mt-1 text-sm text-slate-400">
-                These will become inputs to our AI agent.
-              </p>
-            </div>
+            <p className="mt-1 text-sm text-slate-400">
+              Run structured AI triage before
+              future agentic investigation.
+            </p>
           </div>
+
 
           {loading ? (
             <p className="text-slate-400">
@@ -388,40 +568,79 @@ export default function Home() {
               No incidents yet.
             </p>
           ) : (
-            <div className="space-y-4">
-              {incidents.map((incident) => (
-                <article
-                  key={incident.id}
-                  className="rounded-lg border border-slate-800 bg-slate-950 p-5"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold">
-                        {incident.title}
-                      </h3>
+            <div className="space-y-5">
+              {incidents.map((incident) => {
+                const analysis =
+                  latestAnalyses[
+                    incident.id
+                  ];
 
-                      <p className="mt-1 text-sm text-cyan-400">
-                        {incident.service_name ??
-                          "No service specified"}
-                      </p>
+                const isAnalyzing =
+                  analyzingIncidentId ===
+                  incident.id;
+
+                return (
+                  <article
+                    key={incident.id}
+                    className="rounded-xl border border-slate-800 bg-slate-950 p-5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-semibold">
+                          {incident.title}
+                        </h3>
+
+                        <p className="mt-1 text-sm text-cyan-400">
+                          {incident.service_name ??
+                            "No service specified"}
+                        </p>
+                      </div>
+
+                      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300">
+                        {incident.status}
+                      </span>
                     </div>
 
-                    <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300">
-                      {incident.status}
-                    </span>
-                  </div>
 
-                  <p className="mt-4 text-sm leading-6 text-slate-400">
-                    {incident.description}
-                  </p>
+                    <p className="mt-4 text-sm leading-6 text-slate-400">
+                      {incident.description}
+                    </p>
 
-                  <p className="mt-4 text-xs text-slate-600">
-                    {new Date(
-                      incident.created_at
-                    ).toLocaleString()}
-                  </p>
-                </article>
-              ))}
+
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+                      <p className="text-xs text-slate-600">
+                        {new Date(
+                          incident.created_at
+                        ).toLocaleString()}
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleAnalyzeIncident(
+                            incident.id
+                          )
+                        }
+                        disabled={isAnalyzing}
+                        className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isAnalyzing
+                          ? "Analyzing..."
+                          : analysis
+                            ? "Re-analyze with AI"
+                            : "Analyze with AI"}
+                      </button>
+                    </div>
+
+
+                    {analysis && (
+                      <IncidentAnalysisPanel
+                        analysis={analysis}
+                      />
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

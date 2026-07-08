@@ -1,5 +1,6 @@
 import type {
   Incident,
+  IncidentAnalysis,
   IncidentCreatePayload,
   Workspace,
   WorkspaceCreatePayload,
@@ -17,8 +18,14 @@ async function request<T>(
 ): Promise<T> {
   const headers = new Headers(options.headers);
 
-  if (options.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
+  if (
+    options.body &&
+    !headers.has("Content-Type")
+  ) {
+    headers.set(
+      "Content-Type",
+      "application/json"
+    );
   }
 
   const response = await fetch(
@@ -30,7 +37,8 @@ async function request<T>(
   );
 
   if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
+    let message =
+      `Request failed with status ${response.status}`;
 
     try {
       const body = await response.json();
@@ -85,5 +93,26 @@ export function createIncident(
       method: "POST",
       body: JSON.stringify(payload),
     }
+  );
+}
+
+
+export function analyzeIncident(
+  incidentId: string
+): Promise<IncidentAnalysis> {
+  return request<IncidentAnalysis>(
+    `/api/v1/incidents/${incidentId}/analyze`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+
+export function getIncidentAnalyses(
+  incidentId: string
+): Promise<IncidentAnalysis[]> {
+  return request<IncidentAnalysis[]>(
+    `/api/v1/incidents/${incidentId}/analyses`
   );
 }
