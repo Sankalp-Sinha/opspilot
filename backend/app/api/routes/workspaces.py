@@ -13,6 +13,23 @@ from app.schemas.workspace import (
 router = APIRouter()
 
 
+@router.get(
+    "",
+    response_model=list[WorkspaceRead],
+)
+def list_workspaces(
+    db: Session = Depends(get_db),
+):
+    statement = (
+        select(Workspace)
+        .order_by(Workspace.created_at.desc())
+    )
+
+    workspaces = db.scalars(statement).all()
+
+    return list(workspaces)
+
+
 @router.post(
     "",
     response_model=WorkspaceRead,

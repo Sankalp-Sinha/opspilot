@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -13,6 +14,30 @@ from app.schemas.incident import (
 
 
 router = APIRouter()
+
+
+@router.get(
+    "",
+    response_model=list[IncidentRead],
+)
+def list_incidents(
+    workspace_id: UUID | None = None,
+    db: Session = Depends(get_db),
+):
+    statement = select(Incident)
+
+    if workspace_id is not None:
+        statement = statement.where(
+            Incident.workspace_id == workspace_id
+        )
+
+    statement = statement.order_by(
+        Incident.created_at.desc()
+    )
+
+    incidents = db.scalars(statement).all()
+
+    return list(incidents)
 
 
 @router.post(
