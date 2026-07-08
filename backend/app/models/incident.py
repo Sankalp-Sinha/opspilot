@@ -70,3 +70,11 @@ class Incident(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+    analyses: Mapped[
+        list["IncidentAnalysis"]
+    ] = relationship(
+        back_populates="incident",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

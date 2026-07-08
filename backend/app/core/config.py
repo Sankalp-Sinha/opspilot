@@ -1,11 +1,19 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
     app_name: str = "OpsPilot API"
+
     database_url: str
 
     frontend_origin: str = "http://localhost:3000"
+
+    gemini_api_key: str
+
+    gemini_model: str = "gemini-2.5-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",
