@@ -69,3 +69,31 @@ export interface IncidentAnalysis {
 
   created_at: string;
 }
+
+export interface ToolInvestigationRequest {
+  question: string;
+}
+
+
+export interface ToolExecution {
+  name: string;
+
+  arguments: Record<string, unknown>;
+
+  result: Record<string, unknown>;
+}
+
+
+export interface ToolInvestigation {
+  incident_id: string;
+
+  question: string;
+
+  tool_called: boolean;
+
+  tool_execution: ToolExecution | null;
+
+  final_answer: string;
+
+  model_name: string;
+}

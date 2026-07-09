@@ -2,6 +2,8 @@ import type {
   Incident,
   IncidentAnalysis,
   IncidentCreatePayload,
+  ToolInvestigation,
+  ToolInvestigationRequest,
   Workspace,
   WorkspaceCreatePayload,
 } from "@/types";
@@ -114,5 +116,18 @@ export function getIncidentAnalyses(
 ): Promise<IncidentAnalysis[]> {
   return request<IncidentAnalysis[]>(
     `/api/v1/incidents/${incidentId}/analyses`
+  );
+}
+
+export function investigateIncidentWithTool(
+  incidentId: string,
+  payload: ToolInvestigationRequest
+): Promise<ToolInvestigation> {
+  return request<ToolInvestigation>(
+    `/api/v1/incidents/${incidentId}/tool-investigate`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
   );
 }

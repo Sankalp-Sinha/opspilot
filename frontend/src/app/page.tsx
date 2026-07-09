@@ -8,6 +8,8 @@ import {
 
 import IncidentAnalysisPanel from "@/components/incident-analysis-panel";
 
+import ToolInvestigationPanel from "@/components/tool-investigation-panel";
+
 import {
   analyzeIncident,
   createIncident,
@@ -15,11 +17,13 @@ import {
   getIncidentAnalyses,
   getIncidents,
   getWorkspaces,
+  investigateIncidentWithTool,
 } from "@/lib/api";
 
 import type {
   Incident,
   IncidentAnalysis,
+  ToolInvestigation,
   Workspace,
 } from "@/types";
 
@@ -27,6 +31,18 @@ import type {
 type LatestAnalyses = Record<
   string,
   IncidentAnalysis | null
+>;
+
+
+type InvestigationQuestions = Record<
+  string,
+  string
+>;
+
+
+type ToolInvestigations = Record<
+  string,
+  ToolInvestigation | null
 >;
 
 
@@ -46,6 +62,18 @@ export default function Home() {
     latestAnalyses,
     setLatestAnalyses,
   ] = useState<LatestAnalyses>({});
+
+
+  const [
+    investigationQuestions,
+    setInvestigationQuestions,
+  ] = useState<InvestigationQuestions>({});
+
+
+  const [
+    toolInvestigations,
+    setToolInvestigations,
+  ] = useState<ToolInvestigations>({});
 
 
   const [
@@ -91,9 +119,16 @@ export default function Home() {
     setSubmitting,
   ] = useState(false);
 
+
   const [
     analyzingIncidentId,
     setAnalyzingIncidentId,
+  ] = useState<string | null>(null);
+
+
+  const [
+    investigatingIncidentId,
+    setInvestigatingIncidentId,
   ] = useState<string | null>(null);
 
 
@@ -267,6 +302,20 @@ export default function Home() {
         [incident.id]: null,
       }));
 
+      setToolInvestigations(
+        (current) => ({
+          ...current,
+          [incident.id]: null,
+        })
+      );
+
+      setInvestigationQuestions(
+        (current) => ({
+          ...current,
+          [incident.id]: "",
+        })
+      );
+
       setIncidentTitle("");
       setIncidentDescription("");
       setServiceName("");
@@ -322,6 +371,77 @@ export default function Home() {
   }
 
 
+  function handleInvestigationQuestionChange(
+    incidentId: string,
+    question: string
+  ) {
+    setInvestigationQuestions(
+      (current) => ({
+        ...current,
+        [incidentId]: question,
+      })
+    );
+  }
+
+
+  async function handleToolInvestigation(
+    incidentId: string
+  ) {
+    const question = (
+      investigationQuestions[
+        incidentId
+      ] ?? ""
+    ).trim();
+
+    if (question.length < 5) {
+      setError(
+        "Investigation question must contain at least 5 characters."
+      );
+      return;
+    }
+
+    try {
+      setInvestigatingIncidentId(
+        incidentId
+      );
+
+      setError("");
+      setMessage("");
+
+      const investigation =
+        await investigateIncidentWithTool(
+          incidentId,
+          {
+            question,
+          }
+        );
+
+      setToolInvestigations(
+        (current) => ({
+          ...current,
+          [incidentId]: investigation,
+        })
+      );
+
+      setMessage(
+        investigation.tool_called
+          ? "Tool-assisted investigation completed successfully."
+          : "Investigation completed without a tool call."
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to investigate incident"
+      );
+    } finally {
+      setInvestigatingIncidentId(
+        null
+      );
+    }
+  }
+
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-7xl px-6 py-10">
@@ -335,9 +455,10 @@ export default function Home() {
           </h1>
 
           <p className="mt-3 max-w-2xl text-slate-400">
-            Create operational incidents and
-            perform structured AI-assisted
-            triage using Gemini.
+            Create incidents, perform
+            structured AI triage, and run
+            model-directed operational tool
+            investigations.
           </p>
         </header>
 
@@ -553,8 +674,9 @@ export default function Home() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-400">
-              Run structured AI triage before
-              future agentic investigation.
+              Run structured AI triage and
+              model-directed operational tool
+              investigations.
             </p>
           </div>
 
@@ -575,8 +697,22 @@ export default function Home() {
                     incident.id
                   ];
 
+                const investigation =
+                  toolInvestigations[
+                    incident.id
+                  ];
+
+                const investigationQuestion =
+                  investigationQuestions[
+                    incident.id
+                  ] ?? "";
+
                 const isAnalyzing =
                   analyzingIncidentId ===
+                  incident.id;
+
+                const isInvestigating =
+                  investigatingIncidentId ===
                   incident.id;
 
                 return (
@@ -636,6 +772,77 @@ export default function Home() {
                     {analysis && (
                       <IncidentAnalysisPanel
                         analysis={analysis}
+                      />
+                    )}
+
+
+                    <div className="mt-6 rounded-xl border border-violet-500/20 bg-violet-500/5 p-5">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest text-violet-400">
+                          Operational Investigation
+                        </p>
+
+                        <p className="mt-2 text-sm text-slate-400">
+                          Ask a question and let the
+                          model decide whether an
+                          operational tool is needed.
+                        </p>
+                      </div>
+
+
+                      <textarea
+                        value={
+                          investigationQuestion
+                        }
+                        onChange={(event) =>
+                          handleInvestigationQuestionChange(
+                            incident.id,
+                            event.target.value
+                          )
+                        }
+                        placeholder="Example: Search runtime evidence for errors or timeouts related to the failure"
+                        rows={3}
+                        maxLength={500}
+                        className="mt-4 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none focus:border-violet-500"
+                      />
+
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs text-slate-600">
+                          {
+                            investigationQuestion.length
+                          }
+                          /500
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleToolInvestigation(
+                              incident.id
+                            )
+                          }
+                          disabled={
+                            isInvestigating ||
+                            investigationQuestion
+                              .trim()
+                              .length < 5
+                          }
+                          className="rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isInvestigating
+                            ? "Investigating..."
+                            : "Investigate with Tools"}
+                        </button>
+                      </div>
+                    </div>
+
+
+                    {investigation && (
+                      <ToolInvestigationPanel
+                        investigation={
+                          investigation
+                        }
                       />
                     )}
                   </article>
