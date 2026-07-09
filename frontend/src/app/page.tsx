@@ -6,6 +6,8 @@ import {
   useState,
 } from "react";
 
+import AgentInvestigationPanel from "@/components/agent-investigation-panel";
+
 import IncidentAnalysisPanel from "@/components/incident-analysis-panel";
 
 import ToolInvestigationPanel from "@/components/tool-investigation-panel";
@@ -14,13 +16,17 @@ import {
   analyzeIncident,
   createIncident,
   createWorkspace,
+  getAgentRunStats,
   getIncidentAnalyses,
   getIncidents,
   getWorkspaces,
+  investigateIncidentWithAgent,
   investigateIncidentWithTool,
 } from "@/lib/api";
 
 import type {
+  AgentInvestigation,
+  AgentRunStats,
   Incident,
   IncidentAnalysis,
   ToolInvestigation,
@@ -43,6 +49,17 @@ type InvestigationQuestions = Record<
 type ToolInvestigations = Record<
   string,
   ToolInvestigation | null
+>;
+
+type AgentGoals = Record<
+  string,
+  string
+>;
+
+
+type AgentInvestigations = Record<
+  string,
+  AgentInvestigation | null
 >;
 
 
@@ -74,6 +91,35 @@ export default function Home() {
     toolInvestigations,
     setToolInvestigations,
   ] = useState<ToolInvestigations>({});
+
+  const [
+    agentGoals,
+    setAgentGoals,
+  ] = useState<AgentGoals>({});
+
+
+  const [
+    agentInvestigations,
+    setAgentInvestigations,
+  ] = useState<AgentInvestigations>({});
+
+
+  const [
+    runningAgentIncidentId,
+    setRunningAgentIncidentId,
+  ] = useState<string | null>(null);
+
+
+  const [
+    agentRunStats,
+    setAgentRunStats,
+  ] = useState<AgentRunStats>({
+    total: 0,
+    queued: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+  });
 
 
   const [
@@ -172,6 +218,20 @@ export default function Home() {
     );
   }
 
+  async function refreshAgentRunStats() {
+    try {
+      const stats =
+        await getAgentRunStats();
+
+      setAgentRunStats(
+        stats
+      );
+    } catch {
+      // Agent stats should not prevent
+      // the main dashboard from loading.
+    }
+  }
+
 
   async function loadData() {
     try {
@@ -197,9 +257,13 @@ export default function Home() {
         );
       }
 
-      await loadLatestAnalyses(
-        incidentData
-      );
+      await Promise.all([
+        loadLatestAnalyses(
+          incidentData
+        ),
+
+        refreshAgentRunStats(),
+      ]);
     } catch (err) {
       setError(
         err instanceof Error
@@ -316,6 +380,23 @@ export default function Home() {
         })
       );
 
+      setAgentGoals(
+        (current) => ({
+          ...current,
+
+          [incident.id]: "",
+        })
+      );
+
+
+setAgentInvestigations(
+  (current) => ({
+    ...current,
+
+    [incident.id]: null,
+  })
+);
+
       setIncidentTitle("");
       setIncidentDescription("");
       setServiceName("");
@@ -381,6 +462,90 @@ export default function Home() {
         [incidentId]: question,
       })
     );
+  }
+
+  function handleAgentGoalChange(
+    incidentId: string,
+    goal: string
+  ) {
+    setAgentGoals(
+      (current) => ({
+        ...current,
+
+        [incidentId]: goal,
+      })
+    );
+  }
+
+  async function handleAgentInvestigation(
+    incidentId: string
+  ) {
+    const goal = (
+      agentGoals[
+        incidentId
+      ] ?? ""
+    ).trim();
+
+
+    if (goal.length < 5) {
+      setError(
+        "Agent goal must contain at least 5 characters."
+      );
+
+      return;
+    }
+
+
+    try {
+      setRunningAgentIncidentId(
+        incidentId
+      );
+
+      setError("");
+      setMessage("");
+
+
+      const investigation =
+        await investigateIncidentWithAgent(
+          incidentId,
+          {
+            goal,
+          }
+        );
+
+
+      setAgentInvestigations(
+        (current) => ({
+          ...current,
+
+          [incidentId]:
+            investigation,
+        })
+      );
+
+
+      setMessage(
+        `Agent investigation completed with ${investigation.tool_calls_count} tool call${
+          investigation.tool_calls_count === 1
+            ? ""
+            : "s"
+        }.`
+      );
+
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to run agent investigation"
+      );
+
+    } finally {
+      setRunningAgentIncidentId(
+        null
+      );
+
+      await refreshAgentRunStats();
+    }
   }
 
 
@@ -506,7 +671,15 @@ export default function Home() {
             </p>
 
             <p className="mt-2 text-3xl font-bold">
-              0
+              {agentRunStats.total}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-500">
+              {agentRunStats.completed}
+              {" completed · "}
+
+              {agentRunStats.failed}
+              {" failed"}
             </p>
           </div>
         </section>
@@ -714,6 +887,23 @@ export default function Home() {
                 const isInvestigating =
                   investigatingIncidentId ===
                   incident.id;
+                
+                const agentGoal =
+                  agentGoals[
+                    incident.id
+                  ] ?? "";
+
+
+                const agentInvestigation =
+                  agentInvestigations[
+                    incident.id
+                  ];
+
+
+                const isRunningAgent =
+                  runningAgentIncidentId ===
+                  incident.id;
+                  
 
                 return (
                   <article
@@ -842,6 +1032,79 @@ export default function Home() {
                       <ToolInvestigationPanel
                         investigation={
                           investigation
+                        }
+                      />
+                    )}
+                    <div className="mt-6 rounded-xl border border-blue-500/20 bg-blue-500/5 p-5">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+                          Agentic Investigation
+                        </p>
+
+                        <p className="mt-2 text-sm text-slate-400">
+                          Give the agent an operational goal.
+                          It may dynamically choose zero or
+                          multiple tools and stop when enough
+                          evidence has been gathered.
+                        </p>
+                      </div>
+
+
+                      <textarea
+                        value={agentGoal}
+
+                        onChange={(event) =>
+                          handleAgentGoalChange(
+                            incident.id,
+                            event.target.value
+                          )
+                        }
+
+                        placeholder="Example: Investigate the most likely cause of the HTTP 500 failures and verify important hypotheses using available operational evidence."
+
+                        rows={4}
+
+                        maxLength={1000}
+
+                        className="mt-4 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                      />
+
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs text-slate-600">
+                          {agentGoal.length}
+                          /1000
+                        </p>
+
+
+                        <button
+                          type="button"
+
+                          onClick={() =>
+                            void handleAgentInvestigation(
+                              incident.id
+                            )
+                          }
+
+                          disabled={
+                            runningAgentIncidentId !== null ||
+                            agentGoal.trim().length < 5
+                          }
+
+                          className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isRunningAgent
+                            ? "Running Agent..."
+                            : "Run Agent"}
+                        </button>
+                      </div>
+                    </div>
+
+
+                    {agentInvestigation && (
+                      <AgentInvestigationPanel
+                        investigation={
+                          agentInvestigation
                         }
                       />
                     )}

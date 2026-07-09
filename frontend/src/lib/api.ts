@@ -1,4 +1,7 @@
 import type {
+  AgentInvestigation,
+  AgentInvestigationRequest,
+  AgentRunStats,
   Incident,
   IncidentAnalysis,
   IncidentCreatePayload,
@@ -129,5 +132,30 @@ export function investigateIncidentWithTool(
       method: "POST",
       body: JSON.stringify(payload),
     }
+  );
+}
+
+
+export function investigateIncidentWithAgent(
+  incidentId: string,
+  payload: AgentInvestigationRequest
+): Promise<AgentInvestigation> {
+  return request<AgentInvestigation>(
+    `/api/v1/incidents/${incidentId}/agent-investigate`,
+    {
+      method: "POST",
+
+      body: JSON.stringify(
+        payload
+      ),
+    }
+  );
+}
+
+
+export function getAgentRunStats():
+  Promise<AgentRunStats> {
+  return request<AgentRunStats>(
+    "/api/v1/agent-runs/stats"
   );
 }

@@ -97,3 +97,63 @@ export interface ToolInvestigation {
 
   model_name: string;
 }
+
+export type AgentStopReason =
+  | "model_finished"
+  | "tool_budget_exhausted";
+
+
+export interface AgentToolStep {
+  iteration: number;
+
+  tool_name: string;
+
+  arguments: Record<
+    string,
+    unknown
+  >;
+
+  result: Record<
+    string,
+    unknown
+  >;
+}
+
+
+export interface AgentInvestigationRequest {
+  goal: string;
+}
+
+
+export interface AgentInvestigation {
+  run_id: string;
+
+  incident_id: string;
+
+  goal: string;
+
+  status: "completed";
+
+  steps: AgentToolStep[];
+
+  tool_calls_count: number;
+
+  final_answer: string;
+
+  stop_reason: AgentStopReason;
+
+  model_name: string;
+}
+
+
+export interface AgentRunStats {
+  total: number;
+
+  queued: number;
+
+  running: number;
+
+  completed: number;
+
+  failed: number;
+}
