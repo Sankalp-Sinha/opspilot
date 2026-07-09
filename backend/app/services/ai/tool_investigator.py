@@ -47,6 +47,19 @@ Rules:
 
 7. Keep the final answer concise and operationally
    useful.
+
+8. Only answer questions that are directly related
+   to the supplied incident, the affected service,
+   operational evidence, diagnosis, impact, or
+   investigation steps.
+
+9. If the user's question is unrelated to the
+   incident investigation, do not call any tool.
+   State clearly that the question is outside the
+   scope of the current incident investigation.
+
+10. Do not use general world knowledge to answer
+    unrelated questions.
 """.strip()
 
 
@@ -257,8 +270,17 @@ def investigate_incident_with_one_tool(
             model_name=settings.gemini_model,
         )
 
+    except ToolInvestigationError:
+        raise
+
     except errors.APIError as exc:
         raise ToolInvestigationError(
-            f"Gemini API request failed: "
-            f"{exc.code}"
+            "Gemini API request failed "
+            f"({exc.code}): {exc}"
+        ) from exc
+
+    except Exception as exc:
+        raise ToolInvestigationError(
+            "Unexpected tool investigation error: "
+            f"{type(exc).__name__}: {exc}"
         ) from exc

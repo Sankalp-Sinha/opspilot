@@ -239,13 +239,14 @@ def investigate_incident_with_tool(
         )
 
     except ToolInvestigationError as exc:
+        print(
+            "TOOL INVESTIGATION ERROR:",
+            str(exc),
+        )
+
         raise HTTPException(
-            status_code=(
-                status.HTTP_502_BAD_GATEWAY
-            ),
-            detail=(
-                "Tool investigation service failed"
-            ),
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
         ) from exc
 
     return result
