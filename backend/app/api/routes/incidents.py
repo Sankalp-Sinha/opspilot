@@ -28,6 +28,14 @@ from app.services.ai.incident_analyzer import (
     IncidentAnalysisError,
     analyze_incident_with_ai,
 )
+from app.schemas.tool_investigation import (
+    ToolInvestigationRead,
+    ToolInvestigationRequest,
+)
+from app.services.ai.tool_investigator import (
+    ToolInvestigationError,
+    investigate_incident_with_one_tool,
+)
 
 
 router = APIRouter()
@@ -187,6 +195,61 @@ def list_incident_analyses(
     analyses = db.scalars(statement).all()
 
     return list(analyses)
+
+
+@router.post(
+    "/{incident_id}/tool-investigate",
+    response_model=ToolInvestigationRead,
+)
+def investigate_incident_with_tool(
+    incident_id: UUID,
+
+    payload: ToolInvestigationRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found",
+        )
+
+    try:
+        result = (
+            investigate_incident_with_one_tool(
+                incident_id=incident.id,
+
+                title=incident.title,
+
+                description=(
+                    incident.description
+                ),
+
+                service_name=(
+                    incident.service_name
+                ),
+
+                question=payload.question,
+            )
+        )
+
+    except ToolInvestigationError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "Tool investigation service failed"
+            ),
+        ) from exc
+
+    return result
+
 
 
 @router.get(
