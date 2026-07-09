@@ -11,9 +11,20 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:3000"
 
+    # Phase 2 and Phase 3 temporarily
+    # still use Gemini.
     gemini_api_key: str
 
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = (
+        "gemini-2.5-flash-lite"
+    )
+
+    # Phase 4 agent loop uses Groq.
+    groq_api_key: str
+
+    groq_model: str = (
+        "llama-3.3-70b-versatile"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

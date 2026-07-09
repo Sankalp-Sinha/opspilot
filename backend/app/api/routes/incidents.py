@@ -6,6 +6,8 @@ from fastapi import (
     HTTPException,
     status,
 )
+from datetime import datetime, timezone
+from app.models.agent_run import AgentRun
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,9 +17,17 @@ from app.models.incident import Incident
 from app.models.incident_analysis import (
     IncidentAnalysis,
 )
+from app.schemas.agent_investigation import (
+    AgentInvestigationRead,
+    AgentInvestigationRequest,
+)
 from app.models.workspace import Workspace
 from app.schemas.ai_analysis import (
     IncidentAnalysisRead,
+)
+from app.services.ai.agent_loop import (
+    AgentLoopError,
+    investigate_incident_with_agent,
 )
 from app.schemas.incident import (
     IncidentCreate,
@@ -251,7 +261,94 @@ def investigate_incident_with_tool(
 
     return result
 
+@router.post(
+    "/{incident_id}/agent-investigate",
+    response_model=AgentInvestigationRead,
+)
+def run_agent_investigation(
+    incident_id: UUID,
 
+    payload: AgentInvestigationRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident not found",
+        )
+
+    agent_run = AgentRun(
+        incident_id=incident.id,
+        user_goal=payload.goal,
+        status="running",
+        started_at=datetime.now(
+            timezone.utc
+        ),
+    )
+
+    db.add(agent_run)
+    db.commit()
+    db.refresh(agent_run)
+
+    try:
+        result = (
+            investigate_incident_with_agent(
+                run_id=agent_run.id,
+
+                incident_id=incident.id,
+
+                title=incident.title,
+
+                description=(
+                    incident.description
+                ),
+
+                service_name=(
+                    incident.service_name
+                ),
+
+                goal=payload.goal,
+            )
+        )
+
+    except AgentLoopError as exc:
+        agent_run.status = "failed"
+
+        agent_run.completed_at = (
+            datetime.now(timezone.utc)
+        )
+
+        db.commit()
+
+        print(
+            "AGENT LOOP ERROR:",
+            str(exc),
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "Agent investigation failed"
+            ),
+        ) from exc
+
+    agent_run.status = "completed"
+
+    agent_run.completed_at = (
+        datetime.now(timezone.utc)
+    )
+
+    db.commit()
+
+    return result
 
 @router.get(
     "/{incident_id}",
