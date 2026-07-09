@@ -2,7 +2,11 @@ import json
 from typing import Any
 from uuid import UUID
 
-from groq import Groq
+from langchain.messages import (
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from app.core.config import settings
 
@@ -11,13 +15,13 @@ from app.schemas.agent_investigation import (
     AgentToolStepRead,
 )
 
-from app.services.ai.groq_tool_declarations import (
-    OPS_TOOLS,
+from app.services.ai.langchain_model import (
+    get_ops_chat_model,
 )
 
-from app.tools.registry import (
-    ToolExecutionError,
-    execute_tool,
+from app.tools.langchain_ops_tools import (
+    OPS_LANGCHAIN_TOOL_MAP,
+    OPS_LANGCHAIN_TOOLS,
 )
 
 
@@ -107,6 +111,40 @@ Rules:
 """.strip()
 
 
+SUFFICIENCY_REMINDER = """
+Before taking another action, evaluate whether the exact
+investigation goal is already sufficiently answered by
+the evidence gathered so far.
+
+If yes, return the final answer now without calling
+another tool.
+
+Do not broaden the investigation. Call another tool only
+if a concrete unresolved evidence gap prevents a reliable
+answer to the exact goal.
+""".strip()
+
+
+FINALIZATION_PROMPT = """
+The tool execution budget is now exhausted. Do not request
+any additional tools.
+
+Using only the incident report, investigation goal, and
+operational evidence already present in the conversation
+history, produce the final operational conclusion now.
+
+Your final answer must include:
+1. The strongest evidence gathered.
+2. The most likely hypothesis.
+3. What remains uncertain.
+4. The single best next investigation step.
+
+Do not invent evidence or claim a confirmed root cause
+unless the gathered evidence truly supports that
+conclusion.
+""".strip()
+
+
 class AgentLoopError(RuntimeError):
     pass
 
@@ -134,29 +172,6 @@ def _get_status_code(
         "status_code",
         None,
     )
-
-
-def _parse_tool_arguments(
-    raw_arguments: str | None,
-) -> dict[str, Any]:
-    try:
-        parsed = json.loads(
-            raw_arguments or "{}"
-        )
-
-    except json.JSONDecodeError as exc:
-        raise AgentLoopError(
-            "Groq returned invalid JSON "
-            "tool arguments"
-        ) from exc
-
-    if not isinstance(parsed, dict):
-        raise AgentLoopError(
-            "Groq returned non-object "
-            "tool arguments"
-        )
-
-    return parsed
 
 
 def investigate_incident_with_agent(
@@ -201,19 +216,15 @@ def investigate_incident_with_agent(
 
 
     messages: list[Any] = [
-        {
-            "role": "system",
-
-            "content": (
+        SystemMessage(
+            content=(
                 AGENT_SYSTEM_INSTRUCTION
-            ),
-        },
+            )
+        ),
 
-        {
-            "role": "user",
-
-            "content": user_prompt,
-        },
+        HumanMessage(
+            content=user_prompt
+        ),
     ]
 
 
@@ -226,8 +237,13 @@ def investigate_incident_with_agent(
 
 
     try:
-        client = Groq(
-            api_key=settings.groq_api_key
+        model = get_ops_chat_model()
+
+
+        model_with_tools = (
+            model.bind_tools(
+                OPS_LANGCHAIN_TOOLS
+            )
         )
 
 
@@ -238,59 +254,32 @@ def investigate_incident_with_agent(
             tool_calls_used
             < MAX_TOOL_STEPS
         ):
-            response = (
-                client.chat.completions.create(
-                    model=(
-                        settings.groq_model
-                    ),
-
-                    messages=messages,
-
-                    tools=OPS_TOOLS,
-
-                    tool_choice="auto",
-
-                    parallel_tool_calls=True,
-
-                    temperature=0.1,
-
-                    max_completion_tokens=1200,
+            ai_message = (
+                model_with_tools.invoke(
+                    messages
                 )
-            )
-
-
-            if not response.choices:
-                raise AgentLoopError(
-                    "Groq returned no choices"
-                )
-
-
-            response_message = (
-                response
-                .choices[0]
-                .message
             )
 
 
             tool_calls = (
-                response_message.tool_calls
+                ai_message.tool_calls
                 or []
             )
 
 
-            # No tool call means the model
-            # has decided to finish.
+            # No requested tool means:
+            # the model has finished.
             if not tool_calls:
                 final_answer = (
-                    response_message.content
+                    ai_message.text
                     or ""
                 ).strip()
 
 
                 if not final_answer:
                     raise AgentLoopError(
-                        "Groq returned an empty "
-                        "final answer"
+                        "LangChain model returned "
+                        "an empty final answer"
                     )
 
 
@@ -329,8 +318,8 @@ def investigate_incident_with_agent(
             )
 
 
-            # Avoid partially executing a
-            # model-requested batch.
+            # Never partially execute a batch
+            # that exceeds remaining budget.
             if (
                 len(tool_calls)
                 > remaining_budget
@@ -338,47 +327,66 @@ def investigate_incident_with_agent(
                 break
 
 
-            # Preserve the assistant's exact
+            # Preserve the model's exact
             # tool-call message.
             messages.append(
-                response_message
+                ai_message
             )
 
 
             for tool_call in tool_calls:
                 tool_call_id = (
-                    tool_call.id
+                    tool_call.get("id")
+                )
+
+
+                tool_name = (
+                    tool_call.get("name")
+                )
+
+
+                tool_arguments = (
+                    tool_call.get("args")
+                    or {}
                 )
 
 
                 if not tool_call_id:
                     raise AgentLoopError(
-                        "Groq returned a tool "
-                        "call without an ID"
+                        "Model returned a tool call "
+                        "without an ID"
                     )
-
-
-                tool_name = (
-                    tool_call
-                    .function
-                    .name
-                )
 
 
                 if not tool_name:
                     raise AgentLoopError(
-                        "Groq returned a tool "
-                        "call without a name"
+                        "Model returned a tool call "
+                        "without a name"
                     )
 
 
-                tool_arguments = (
-                    _parse_tool_arguments(
-                        tool_call
-                        .function
-                        .arguments
+                if not isinstance(
+                    tool_arguments,
+                    dict,
+                ):
+                    raise AgentLoopError(
+                        "Model returned non-object "
+                        "tool arguments"
+                    )
+
+
+                selected_tool = (
+                    OPS_LANGCHAIN_TOOL_MAP.get(
+                        tool_name
                     )
                 )
+
+
+                if selected_tool is None:
+                    raise AgentLoopError(
+                        "Model selected unknown tool: "
+                        f"{tool_name}"
+                    )
 
 
                 tool_signature = (
@@ -396,9 +404,8 @@ def investigate_incident_with_agent(
                     in seen_tool_calls
                 ):
                     raise AgentLoopError(
-                        "Agent repeated an "
-                        "identical tool call; "
-                        "loop stopped"
+                        "Agent repeated an identical "
+                        "tool call; loop stopped"
                     )
 
 
@@ -408,19 +415,29 @@ def investigate_incident_with_agent(
 
 
                 try:
-                    tool_result = execute_tool(
-                        tool_name=tool_name,
-
-                        arguments=(
+                    tool_result = (
+                        selected_tool.invoke(
                             tool_arguments
-                        ),
+                        )
                     )
 
-                except ToolExecutionError as exc:
+                except Exception as exc:
                     raise AgentLoopError(
-                        "Agent-selected tool "
-                        "could not be executed"
+                        "LangChain tool "
+                        f"'{tool_name}' failed: "
+                        f"{type(exc).__name__}: "
+                        f"{exc}"
                     ) from exc
+
+
+                if not isinstance(
+                    tool_result,
+                    dict,
+                ):
+                    raise AgentLoopError(
+                        f"Tool '{tool_name}' returned "
+                        "a non-object result"
+                    )
 
 
                 tool_calls_used += 1
@@ -448,136 +465,64 @@ def investigate_incident_with_agent(
 
 
                 messages.append(
-                    {
-                        "role": "tool",
-
-                        "tool_call_id": (
-                            tool_call_id
-                        ),
-
-                        "name": tool_name,
-
-                        "content": json.dumps(
+                    ToolMessage(
+                        content=json.dumps(
                             {
-                                "result": (
+                                "result":
                                     tool_result
-                                )
                             },
 
                             default=str,
                         ),
-                    }
+
+                        tool_call_id=(
+                            tool_call_id
+                        ),
+
+                        name=tool_name,
+                    )
                 )
 
 
+            # Ask the model to explicitly
+            # check whether more evidence
+            # is truly necessary.
             messages.append(
-                {
-                    "role": "user",
-
-                    "content": (
-                        "Before taking another action, "
-                        "evaluate whether the exact "
-                        "investigation goal is already "
-                        "sufficiently answered by the "
-                        "evidence gathered so far. "
-
-                        "If yes, return the final answer "
-                        "now without calling another tool. "
-
-                        "Do not broaden the investigation. "
-                        "Call another tool only if a "
-                        "concrete unresolved evidence gap "
-                        "prevents a reliable answer to the "
-                        "exact goal."
-                    ),
-                }
+                HumanMessage(
+                    content=(
+                        SUFFICIENCY_REMINDER
+                    )
+                )
             )
 
 
-        # We reach here when the total
-        # tool budget is exhausted or the
-        # requested batch exceeds the
-        # remaining budget.
-        finalization_messages = [
-            *messages,
+        # We reach here when:
+        # - all tool budget is used, or
+        # - requested batch exceeds
+        #   remaining budget.
+        final_response = model.invoke(
+            [
+                *messages,
 
-            {
-                "role": "user",
-
-                "content": (
-                    "The tool execution budget is now "
-                    "exhausted. Do not request any "
-                    "additional tools. Using only the "
-                    "incident report, investigation "
-                    "goal, and operational evidence "
-                    "already present in the conversation "
-                    "history, produce the final "
-                    "operational conclusion now.\n\n"
-
-                    "Your final answer must include:\n"
-
-                    "1. The strongest evidence gathered.\n"
-
-                    "2. The most likely hypothesis.\n"
-
-                    "3. What remains uncertain.\n"
-
-                    "4. The single best next "
-                    "investigation step.\n\n"
-
-                    "Do not invent evidence or claim a "
-                    "confirmed root cause unless the "
-                    "gathered evidence truly supports "
-                    "that conclusion."
+                HumanMessage(
+                    content=(
+                        FINALIZATION_PROMPT
+                    )
                 ),
-            },
-        ]
-
-
-        final_response = (
-            client.chat.completions.create(
-                model=(
-                    settings.groq_model
-                ),
-
-                messages=(
-                    finalization_messages
-                ),
-
-                temperature=0.1,
-
-                max_completion_tokens=1200,
-            )
+            ]
         )
 
 
-        if not final_response.choices:
-            raise AgentLoopError(
-                "Groq returned no choices in "
-                "the forced final response"
-            )
-
-
         final_answer = (
-            final_response
-            .choices[0]
-            .message
-            .content
+            final_response.text
             or ""
         ).strip()
 
 
         if not final_answer:
-            finish_reason = (
-                final_response
-                .choices[0]
-                .finish_reason
-            )
-
             raise AgentLoopError(
-                "Groq returned an empty forced "
-                "final answer. "
-                f"Finish reason: {finish_reason}"
+                "LangChain model returned "
+                "an empty forced final answer"
             )
 
 
@@ -618,13 +563,13 @@ def investigate_incident_with_agent(
 
         if status_code is not None:
             raise AgentLoopError(
-                "Groq API request failed "
+                "LangChain model request failed "
                 f"({status_code}): {exc}"
             ) from exc
 
 
         raise AgentLoopError(
-            "Unexpected Groq agent loop "
+            "Unexpected LangChain agent loop "
             f"error: {type(exc).__name__}: "
             f"{exc}"
         ) from exc
