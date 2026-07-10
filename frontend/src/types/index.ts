@@ -157,3 +157,41 @@ export interface AgentRunStats {
 
   failed: number;
 }
+
+export interface LangChainAgentInvestigation {
+  incident_id: string;
+  goal: string;
+
+  steps: AgentToolStep[];
+
+  tool_calls_count: number;
+  model_calls_count: number;
+
+  final_answer: string;
+  model_name: string;
+
+  harness: "langchain_create_agent";
+}
+
+
+export interface LangGraphAgentInvestigation {
+  incident_id: string;
+  goal: string;
+
+  steps: AgentToolStep[];
+
+  tool_calls_count: number;
+  model_calls_count: number;
+
+  node_trace: string[];
+
+  final_answer: string;
+
+  stop_reason:
+    | "model_finished"
+    | "tool_budget_exhausted";
+
+  model_name: string;
+
+  harness: "langgraph_state_graph";
+}

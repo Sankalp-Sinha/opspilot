@@ -6,11 +6,12 @@ import {
   useState,
 } from "react";
 
-import AgentInvestigationPanel from "@/components/agent-investigation-panel";
 
 import IncidentAnalysisPanel from "@/components/incident-analysis-panel";
 
 import ToolInvestigationPanel from "@/components/tool-investigation-panel";
+
+import AgentOrchestrationComparison from "@/components/agent-orchestration-comparison";
 
 import {
   analyzeIncident,
@@ -20,12 +21,10 @@ import {
   getIncidentAnalyses,
   getIncidents,
   getWorkspaces,
-  investigateIncidentWithAgent,
   investigateIncidentWithTool,
 } from "@/lib/api";
 
 import type {
-  AgentInvestigation,
   AgentRunStats,
   Incident,
   IncidentAnalysis,
@@ -49,17 +48,6 @@ type InvestigationQuestions = Record<
 type ToolInvestigations = Record<
   string,
   ToolInvestigation | null
->;
-
-type AgentGoals = Record<
-  string,
-  string
->;
-
-
-type AgentInvestigations = Record<
-  string,
-  AgentInvestigation | null
 >;
 
 
@@ -91,23 +79,6 @@ export default function Home() {
     toolInvestigations,
     setToolInvestigations,
   ] = useState<ToolInvestigations>({});
-
-  const [
-    agentGoals,
-    setAgentGoals,
-  ] = useState<AgentGoals>({});
-
-
-  const [
-    agentInvestigations,
-    setAgentInvestigations,
-  ] = useState<AgentInvestigations>({});
-
-
-  const [
-    runningAgentIncidentId,
-    setRunningAgentIncidentId,
-  ] = useState<string | null>(null);
 
 
   const [
@@ -189,35 +160,6 @@ export default function Home() {
   ] = useState("");
 
 
-  async function loadLatestAnalyses(
-    incidentData: Incident[]
-  ) {
-    const entries = await Promise.all(
-      incidentData.map(async (incident) => {
-        try {
-          const analyses =
-            await getIncidentAnalyses(
-              incident.id
-            );
-
-          return [
-            incident.id,
-            analyses[0] ?? null,
-          ] as const;
-        } catch {
-          return [
-            incident.id,
-            null,
-          ] as const;
-        }
-      })
-    );
-
-    setLatestAnalyses(
-      Object.fromEntries(entries)
-    );
-  }
-
   async function refreshAgentRunStats() {
     try {
       const stats =
@@ -233,51 +175,113 @@ export default function Home() {
   }
 
 
-  async function loadData() {
-    try {
-      setError("");
-
-      const [
-        workspaceData,
-        incidentData,
-      ] = await Promise.all([
-        getWorkspaces(),
-        getIncidents(),
-      ]);
-
-      setWorkspaces(workspaceData);
-      setIncidents(incidentData);
-
-      if (
-        !selectedWorkspaceId &&
-        workspaceData.length > 0
-      ) {
-        setSelectedWorkspaceId(
-          workspaceData[0].id
-        );
-      }
-
-      await Promise.all([
-        loadLatestAnalyses(
-          incidentData
-        ),
-
-        refreshAgentRunStats(),
-      ]);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load dashboard"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-
   useEffect(() => {
-    void loadData();
+    let cancelled = false;
+
+
+    async function initializeDashboard() {
+      try {
+        const [
+          workspaceData,
+          incidentData,
+        ] = await Promise.all([
+          getWorkspaces(),
+          getIncidents(),
+        ]);
+
+
+        const analysisEntries =
+          await Promise.all(
+            incidentData.map(
+              async (incident) => {
+                try {
+                  const analyses =
+                    await getIncidentAnalyses(
+                      incident.id
+                    );
+
+                  return [
+                    incident.id,
+                    analyses[0] ?? null,
+                  ] as const;
+                } catch {
+                  return [
+                    incident.id,
+                    null,
+                  ] as const;
+                }
+              }
+            )
+          );
+
+
+        const stats =
+          await getAgentRunStats()
+            .catch(() => null);
+
+
+        if (cancelled) {
+          return;
+        }
+
+
+        setWorkspaces(
+          workspaceData
+        );
+
+        setIncidents(
+          incidentData
+        );
+
+
+        if (
+          workspaceData.length > 0
+        ) {
+          setSelectedWorkspaceId(
+            workspaceData[0].id
+          );
+        }
+
+
+        setLatestAnalyses(
+          Object.fromEntries(
+            analysisEntries
+          )
+        );
+
+
+        if (stats) {
+          setAgentRunStats(
+            stats
+          );
+        }
+
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load dashboard"
+        );
+
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+
+    void initializeDashboard();
+
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
 
@@ -380,23 +384,6 @@ export default function Home() {
         })
       );
 
-      setAgentGoals(
-        (current) => ({
-          ...current,
-
-          [incident.id]: "",
-        })
-      );
-
-
-setAgentInvestigations(
-  (current) => ({
-    ...current,
-
-    [incident.id]: null,
-  })
-);
-
       setIncidentTitle("");
       setIncidentDescription("");
       setServiceName("");
@@ -463,91 +450,6 @@ setAgentInvestigations(
       })
     );
   }
-
-  function handleAgentGoalChange(
-    incidentId: string,
-    goal: string
-  ) {
-    setAgentGoals(
-      (current) => ({
-        ...current,
-
-        [incidentId]: goal,
-      })
-    );
-  }
-
-  async function handleAgentInvestigation(
-    incidentId: string
-  ) {
-    const goal = (
-      agentGoals[
-        incidentId
-      ] ?? ""
-    ).trim();
-
-
-    if (goal.length < 5) {
-      setError(
-        "Agent goal must contain at least 5 characters."
-      );
-
-      return;
-    }
-
-
-    try {
-      setRunningAgentIncidentId(
-        incidentId
-      );
-
-      setError("");
-      setMessage("");
-
-
-      const investigation =
-        await investigateIncidentWithAgent(
-          incidentId,
-          {
-            goal,
-          }
-        );
-
-
-      setAgentInvestigations(
-        (current) => ({
-          ...current,
-
-          [incidentId]:
-            investigation,
-        })
-      );
-
-
-      setMessage(
-        `Agent investigation completed with ${investigation.tool_calls_count} tool call${
-          investigation.tool_calls_count === 1
-            ? ""
-            : "s"
-        }.`
-      );
-
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to run agent investigation"
-      );
-
-    } finally {
-      setRunningAgentIncidentId(
-        null
-      );
-
-      await refreshAgentRunStats();
-    }
-  }
-
 
   async function handleToolInvestigation(
     incidentId: string
@@ -865,6 +767,8 @@ setAgentInvestigations(
           ) : (
             <div className="space-y-5">
               {incidents.map((incident) => {
+
+                
                 const analysis =
                   latestAnalyses[
                     incident.id
@@ -886,22 +790,6 @@ setAgentInvestigations(
 
                 const isInvestigating =
                   investigatingIncidentId ===
-                  incident.id;
-                
-                const agentGoal =
-                  agentGoals[
-                    incident.id
-                  ] ?? "";
-
-
-                const agentInvestigation =
-                  agentInvestigations[
-                    incident.id
-                  ];
-
-
-                const isRunningAgent =
-                  runningAgentIncidentId ===
                   incident.id;
                   
 
@@ -1035,79 +923,12 @@ setAgentInvestigations(
                         }
                       />
                     )}
-                    <div className="mt-6 rounded-xl border border-blue-500/20 bg-blue-500/5 p-5">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
-                          Agentic Investigation
-                        </p>
-
-                        <p className="mt-2 text-sm text-slate-400">
-                          Give the agent an operational goal.
-                          It may dynamically choose zero or
-                          multiple tools and stop when enough
-                          evidence has been gathered.
-                        </p>
-                      </div>
-
-
-                      <textarea
-                        value={agentGoal}
-
-                        onChange={(event) =>
-                          handleAgentGoalChange(
-                            incident.id,
-                            event.target.value
-                          )
-                        }
-
-                        placeholder="Example: Investigate the most likely cause of the HTTP 500 failures and verify important hypotheses using available operational evidence."
-
-                        rows={4}
-
-                        maxLength={1000}
-
-                        className="mt-4 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
-                      />
-
-
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-xs text-slate-600">
-                          {agentGoal.length}
-                          /1000
-                        </p>
-
-
-                        <button
-                          type="button"
-
-                          onClick={() =>
-                            void handleAgentInvestigation(
-                              incident.id
-                            )
-                          }
-
-                          disabled={
-                            runningAgentIncidentId !== null ||
-                            agentGoal.trim().length < 5
-                          }
-
-                          className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isRunningAgent
-                            ? "Running Agent..."
-                            : "Run Agent"}
-                        </button>
-                      </div>
-                    </div>
-
-
-                    {agentInvestigation && (
-                      <AgentInvestigationPanel
-                        investigation={
-                          agentInvestigation
-                        }
-                      />
-                    )}
+                    <AgentOrchestrationComparison
+                      incidentId={incident.id}
+                      onManualRunFinished={
+                        refreshAgentRunStats
+                      }
+                    />
                   </article>
                 );
               })}

@@ -9,11 +9,13 @@ import type {
   ToolInvestigationRequest,
   Workspace,
   WorkspaceCreatePayload,
+  LangChainAgentInvestigation,
+  LangGraphAgentInvestigation,
 } from "@/types";
 
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ??
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
   "http://127.0.0.1:8000";
 
 
@@ -34,7 +36,7 @@ async function request<T>(
   }
 
   const response = await fetch(
-    `${API_URL}${path}`,
+    `${API_BASE_URL}${path}`,
     {
       ...options,
       headers,
@@ -158,4 +160,71 @@ export function getAgentRunStats():
   return request<AgentRunStats>(
     "/api/v1/agent-runs/stats"
   );
+}
+
+export async function investigateIncidentWithLangChainAgent(
+  incidentId: string,
+  payload: AgentInvestigationRequest,
+): Promise<LangChainAgentInvestigation> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/incidents/${incidentId}/langchain-agent-investigate`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(payload),
+    },
+  );
+
+
+  if (!response.ok) {
+    const errorBody = await response
+      .json()
+      .catch(() => null);
+
+    throw new Error(
+      errorBody?.detail ??
+        "LangChain agent investigation failed",
+    );
+  }
+
+
+  return response.json();
+}
+
+
+export async function investigateIncidentWithLangGraphAgent(
+  incidentId: string,
+  payload: AgentInvestigationRequest,
+): Promise<LangGraphAgentInvestigation> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/incidents/${incidentId}/langgraph-agent-investigate`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(payload),
+    },
+  );
+
+
+  if (!response.ok) {
+    const errorBody = await response
+      .json()
+      .catch(() => null);
+
+    throw new Error(
+      errorBody?.detail ??
+        "LangGraph agent investigation failed",
+    );
+  }
+
+
+  return response.json();
 }

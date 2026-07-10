@@ -1,6 +1,6 @@
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.tools.ops_tools import (
     get_recent_deployments,
@@ -9,11 +9,28 @@ from app.tools.ops_tools import (
 )
 
 
-class QueryServiceMetricsArgs(BaseModel):
-    service_name: str = Field(
-        min_length=1,
-        max_length=120,
-    )
+def _coerce_integer_string(
+    value: Any,
+) -> Any:
+    if isinstance(
+        value,
+        str,
+    ):
+        cleaned = value.strip()
+
+        try:
+            return int(cleaned)
+
+        except ValueError:
+            return value
+
+    return value
+
+
+class QueryServiceMetricsArgs(
+    BaseModel
+):
+    service_name: str
 
     window_minutes: int = Field(
         default=30,
@@ -22,16 +39,29 @@ class QueryServiceMetricsArgs(BaseModel):
     )
 
 
-class SearchServiceLogsArgs(BaseModel):
-    service_name: str = Field(
-        min_length=1,
-        max_length=120,
+    @field_validator(
+        "window_minutes",
+        mode="before",
+        json_schema_input_type=(
+            int | str
+        ),
     )
+    @classmethod
+    def coerce_window_minutes(
+        cls,
+        value: Any,
+    ) -> Any:
+        return _coerce_integer_string(
+            value
+        )
 
-    query: str = Field(
-        min_length=1,
-        max_length=200,
-    )
+
+class SearchServiceLogsArgs(
+    BaseModel
+):
+    service_name: str
+
+    query: str
 
     limit: int = Field(
         default=20,
@@ -40,17 +70,50 @@ class SearchServiceLogsArgs(BaseModel):
     )
 
 
-class GetRecentDeploymentsArgs(BaseModel):
-    service_name: str = Field(
-        min_length=1,
-        max_length=120,
+    @field_validator(
+        "limit",
+        mode="before",
+        json_schema_input_type=(
+            int | str
+        ),
     )
+    @classmethod
+    def coerce_limit(
+        cls,
+        value: Any,
+    ) -> Any:
+        return _coerce_integer_string(
+            value
+        )
+    
+
+class GetRecentDeploymentsArgs(
+    BaseModel
+):
+    service_name: str
 
     hours: int = Field(
         default=24,
         ge=1,
         le=168,
     )
+
+
+    @field_validator(
+        "hours",
+        mode="before",
+        json_schema_input_type=(
+            int | str
+        ),
+    )
+    @classmethod
+    def coerce_hours(
+        cls,
+        value: Any,
+    ) -> Any:
+        return _coerce_integer_string(
+            value
+        )
 
 
 class ToolExecutionError(RuntimeError):
