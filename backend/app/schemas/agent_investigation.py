@@ -68,3 +68,35 @@ class LangChainAgentInvestigationRead(BaseModel):
     harness: Literal[
         "langchain_create_agent"
     ] = "langchain_create_agent"
+
+
+
+class LangGraphAgentInvestigationRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    goal: str
+
+    steps: list[
+        AgentToolStepRead
+    ]
+
+    tool_calls_count: int
+
+    model_calls_count: int
+
+    node_trace: list[str]
+
+    final_answer: str
+
+    stop_reason: Literal[
+        "model_finished",
+        "tool_budget_exhausted",
+    ]
+
+    model_name: str
+
+    harness: Literal[
+        "langgraph_state_graph"
+    ] = "langgraph_state_graph"

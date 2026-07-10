@@ -21,6 +21,7 @@ from app.schemas.agent_investigation import (
     AgentInvestigationRead,
     AgentInvestigationRequest,
     LangChainAgentInvestigationRead,
+    LangGraphAgentInvestigationRead,
 )
 from app.models.workspace import Workspace
 from app.schemas.ai_analysis import (
@@ -50,6 +51,10 @@ from app.services.ai.tool_investigator import (
 from app.services.ai.langchain_framework_agent import (
     LangChainFrameworkAgentError,
     investigate_with_langchain_agent,
+)
+from app.services.ai.langgraph_agent import (
+    LangGraphAgentError,
+    investigate_with_langgraph_agent,
 )
 
 
@@ -444,4 +449,72 @@ def get_incident(
         )
 
     return incident
+
+@router.post(
+    "/{incident_id}/langgraph-agent-investigate",
+
+    response_model=(
+        LangGraphAgentInvestigationRead
+    ),
+)
+def run_langgraph_agent_investigation(
+    incident_id: UUID,
+
+    payload: AgentInvestigationRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail="Incident not found",
+        )
+
+
+    try:
+        return (
+            investigate_with_langgraph_agent(
+                incident_id=incident.id,
+
+                title=incident.title,
+
+                description=(
+                    incident.description
+                ),
+
+                service_name=(
+                    incident.service_name
+                ),
+
+                goal=payload.goal,
+            )
+        )
+
+
+    except LangGraphAgentError as exc:
+        print(
+            "LANGGRAPH AGENT ERROR:",
+            str(exc),
+        )
+
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+
+            detail=(
+                "LangGraph agent "
+                "investigation failed"
+            ),
+        ) from exc
 
