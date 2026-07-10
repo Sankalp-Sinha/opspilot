@@ -161,7 +161,7 @@ def analyze_incident(
             ai_output.analysis_summary
         ),
         confidence=ai_output.confidence,
-        model_name=settings.gemini_model,
+        model_name=settings.groq_model,
         prompt_version=PROMPT_VERSION,
     )
 
