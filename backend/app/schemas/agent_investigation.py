@@ -2,6 +2,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 AgentStopReason = Literal[
@@ -45,3 +46,25 @@ class AgentInvestigationRead(BaseModel):
     stop_reason: AgentStopReason
 
     model_name: str
+
+
+class LangChainAgentInvestigationRead(BaseModel):
+    incident_id: UUID
+
+    goal: str
+
+    steps: list[
+        AgentToolStepRead
+    ]
+
+    tool_calls_count: int
+
+    model_calls_count: int
+
+    final_answer: str
+
+    model_name: str
+
+    harness: Literal[
+        "langchain_create_agent"
+    ] = "langchain_create_agent"

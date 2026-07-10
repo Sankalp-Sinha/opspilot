@@ -20,6 +20,7 @@ from app.models.incident_analysis import (
 from app.schemas.agent_investigation import (
     AgentInvestigationRead,
     AgentInvestigationRequest,
+    LangChainAgentInvestigationRead,
 )
 from app.models.workspace import Workspace
 from app.schemas.ai_analysis import (
@@ -45,6 +46,10 @@ from app.schemas.tool_investigation import (
 from app.services.ai.tool_investigator import (
     ToolInvestigationError,
     investigate_incident_with_one_tool,
+)
+from app.services.ai.langchain_framework_agent import (
+    LangChainFrameworkAgentError,
+    investigate_with_langchain_agent,
 )
 
 
@@ -350,6 +355,75 @@ def run_agent_investigation(
 
     return result
 
+
+@router.post(
+    "/{incident_id}/langchain-agent-investigate",
+    response_model=(
+        LangChainAgentInvestigationRead
+    ),
+)
+def run_langchain_agent_investigation(
+    incident_id: UUID,
+
+    payload: AgentInvestigationRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail="Incident not found",
+        )
+
+
+    try:
+        return (
+            investigate_with_langchain_agent(
+                incident_id=incident.id,
+
+                title=incident.title,
+
+                description=(
+                    incident.description
+                ),
+
+                service_name=(
+                    incident.service_name
+                ),
+
+                goal=payload.goal,
+            )
+        )
+
+
+    except LangChainFrameworkAgentError as exc:
+        print(
+            "LANGCHAIN FRAMEWORK "
+            "AGENT ERROR:",
+            str(exc),
+        )
+
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+
+            detail=(
+                "LangChain framework "
+                "agent investigation failed"
+            ),
+        ) from exc
+
 @router.get(
     "/{incident_id}",
     response_model=IncidentRead,
@@ -370,3 +444,4 @@ def get_incident(
         )
 
     return incident
+
