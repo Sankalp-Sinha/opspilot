@@ -26,6 +26,8 @@ class Settings(BaseSettings):
         "llama-3.3-70b-versatile"
     )
 
+    langgraph_checkpoint_db_uri: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

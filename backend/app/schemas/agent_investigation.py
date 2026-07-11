@@ -100,3 +100,60 @@ class LangGraphAgentInvestigationRead(
     harness: Literal[
         "langgraph_state_graph"
     ] = "langgraph_state_graph"
+
+
+
+class PersistentLangGraphInvestigationRequest(
+    BaseModel
+):
+    goal: str = Field(
+        min_length=5,
+        max_length=1000,
+    )
+
+    thread_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+
+
+class PersistentLangGraphInvestigationRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    thread_id: str
+
+    is_continuation: bool
+
+    checkpoint_id: str | None
+
+    message_count: int
+
+    goal: str
+
+    steps: list[
+        AgentToolStepRead
+    ]
+
+    tool_calls_count: int
+
+    model_calls_count: int
+
+    node_trace: list[str]
+
+    final_answer: str
+
+    stop_reason: Literal[
+        "model_finished",
+        "tool_budget_exhausted",
+    ]
+
+    model_name: str
+
+    harness: Literal[
+        "langgraph_postgres_checkpoint"
+    ] = (
+        "langgraph_postgres_checkpoint"
+    )

@@ -1,5 +1,4 @@
 import json
-import operator
 
 from typing import (
     Annotated,
@@ -8,6 +7,10 @@ from typing import (
 )
 
 from uuid import UUID
+
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+)
 
 from langchain.messages import (
     AIMessage,
@@ -56,6 +59,21 @@ MAX_TOOL_STEPS = 3
 
 GRAPH_RECURSION_LIMIT = 12
 
+TOOL_CALL_RETRY_PROMPT = """
+Your previous tool call attempt was rejected because the
+function-call JSON or tool arguments were invalid.
+
+Retry exactly once.
+
+Rules:
+1. Use only valid JSON tool arguments.
+2. String values must have matching quotes.
+3. Do not include broken braces, broken quotes, or unmatched parentheses.
+4. For search_service_logs, use this shape:
+   {"service_name": "...", "query": "...", "limit": 20}
+5. If the exact goal can be answered from existing thread evidence, answer directly instead of calling a tool.
+""".strip()
+
 
 class LangGraphAgentError(
     RuntimeError
@@ -85,20 +103,24 @@ class IncidentGraphState(
         add_messages,
     ]
 
-    steps: Annotated[
-        list[AgentToolStepRead],
-        operator.add,
+    steps: list[
+        AgentToolStepRead
     ]
 
-    node_trace: Annotated[
-        list[str],
-        operator.add,
-    ]
+    node_trace: list[str]
 
-    seen_tool_calls: Annotated[
-        list[str],
-        operator.add,
-    ]
+    seen_tool_calls: list[str]
+
+    tool_calls_used: int
+
+    model_calls_count: int
+
+    final_answer: str
+
+    stop_reason: GraphStopReason
+
+    next_action: GraphNextAction
+
 
     tool_calls_used: int
 
@@ -162,8 +184,89 @@ def _get_ai_message_text(
 
     return ""
 
+def _is_tool_use_failure(
+    exc: Exception,
+) -> bool:
+    text = str(exc).lower()
 
-def _build_incident_graph():
+    return (
+        "tool_use_failed" in text
+        or "failed_generation" in text
+        or "failed to call a function" in text
+        or "tool call validation failed" in text
+    )
+
+
+def _invoke_model_with_tools_safely(
+    *,
+    model_with_tools: Any,
+    messages: list[AnyMessage],
+) -> tuple[
+    AIMessage,
+    list[AnyMessage],
+]:
+    try:
+        ai_message = model_with_tools.invoke(
+            messages
+        )
+
+    except Exception as exc:
+        if not _is_tool_use_failure(
+            exc
+        ):
+            raise
+
+
+        retry_message = HumanMessage(
+            content=TOOL_CALL_RETRY_PROMPT
+        )
+
+
+        ai_message = model_with_tools.invoke(
+            [
+                *messages,
+                retry_message,
+            ]
+        )
+
+
+        if not isinstance(
+            ai_message,
+            AIMessage,
+        ):
+            raise LangGraphAgentError(
+                "Model retry returned a non-AI message"
+            )
+
+
+        return (
+            ai_message,
+            [retry_message],
+        )
+
+
+    if not isinstance(
+        ai_message,
+        AIMessage,
+    ):
+        raise LangGraphAgentError(
+            "Model returned a non-AI message"
+        )
+
+
+    return (
+        ai_message,
+        [],
+    )
+
+
+def _build_incident_graph(
+    *,
+    checkpointer: (
+        BaseCheckpointSaver
+        | None
+    ) = None,
+):
     model = get_ops_chat_model()
 
     model_with_tools = (
@@ -176,9 +279,15 @@ def _build_incident_graph():
     def agent_node(
         state: IncidentGraphState,
     ) -> dict[str, Any]:
-        ai_message = (
-            model_with_tools.invoke(
-                state["messages"]
+        ai_message, retry_messages = (
+            _invoke_model_with_tools_safely(
+                model_with_tools=(
+                    model_with_tools
+                ),
+
+                messages=(
+                    state["messages"]
+                ),
             )
         )
 
@@ -210,7 +319,8 @@ def _build_incident_graph():
 
             return {
                 "messages": [
-                    ai_message
+                    *retry_messages,
+                    ai_message,
                 ],
 
                 "model_calls_count":
@@ -226,7 +336,8 @@ def _build_incident_graph():
                     "end",
 
                 "node_trace": [
-                    "agent"
+                    *state["node_trace"],
+                    "agent",
                 ],
             }
 
@@ -258,7 +369,8 @@ def _build_incident_graph():
                     "finalize",
 
                 "node_trace": [
-                    "agent"
+                    *state["node_trace"],
+                    "agent",
                 ],
             }
 
@@ -267,7 +379,8 @@ def _build_incident_graph():
         # Tool requests fit the budget.
         return {
             "messages": [
-                ai_message
+                *retry_messages,
+                ai_message,
             ],
 
             "model_calls_count":
@@ -277,7 +390,8 @@ def _build_incident_graph():
                 "tools",
 
             "node_trace": [
-                "agent"
+                *state["node_trace"],
+                "agent",
             ],
         }
 
@@ -556,17 +670,22 @@ def _build_incident_graph():
             "messages":
                 message_updates,
 
-            "steps":
-                new_steps,
+            "steps": [
+                *state["steps"],
+                *new_steps,
+            ],
 
-            "seen_tool_calls":
-                new_signatures,
+            "seen_tool_calls": [
+                *state["seen_tool_calls"],
+                *new_signatures,
+            ],
 
             "tool_calls_used":
                 tool_calls_used,
 
             "node_trace": [
-                "tools"
+                *state["node_trace"],
+                "tools",
             ],
         }
 
@@ -636,7 +755,8 @@ def _build_incident_graph():
                 "end",
 
             "node_trace": [
-                "finalize"
+                *state["node_trace"],
+                "finalize",
             ],
         }
 
@@ -707,7 +827,9 @@ def _build_incident_graph():
     )
 
 
-    return builder.compile()
+    return builder.compile(
+        checkpointer=checkpointer
+    )
 
 
 def investigate_with_langgraph_agent(

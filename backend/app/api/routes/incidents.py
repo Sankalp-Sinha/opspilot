@@ -1,10 +1,18 @@
 from uuid import UUID
-
+import traceback
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
     status,
+)
+from app.schemas.agent_investigation import (
+    PersistentLangGraphInvestigationRead,
+    PersistentLangGraphInvestigationRequest,
+)
+from app.services.ai.persistent_langgraph_agent import (
+    PersistentLangGraphAgentError,
+    investigate_with_persistent_langgraph_agent,
 )
 from datetime import datetime, timezone
 from app.models.agent_run import AgentRun
@@ -501,8 +509,83 @@ def run_langgraph_agent_investigation(
 
 
     except LangGraphAgentError as exc:
+        print("\nLANGGRAPH AGENT ERROR:")
+        traceback.print_exception(
+            type(exc),
+            exc,
+            exc.__traceback__,
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "LangGraph agent "
+                "investigation failed"
+            ),
+        ) from exc
+
+
+@router.post(
+    "/{incident_id}/persistent-langgraph-agent-investigate",
+
+    response_model=(
+        PersistentLangGraphInvestigationRead
+    ),
+)
+def run_persistent_langgraph_investigation(
+    incident_id: UUID,
+
+    payload:
+        PersistentLangGraphInvestigationRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail="Incident not found",
+        )
+
+
+    try:
+        return (
+            investigate_with_persistent_langgraph_agent(
+                incident_id=incident.id,
+
+                title=incident.title,
+
+                description=(
+                    incident.description
+                ),
+
+                service_name=(
+                    incident.service_name
+                ),
+
+                goal=payload.goal,
+
+                thread_id=(
+                    payload.thread_id
+                ),
+            )
+        )
+
+
+    except PersistentLangGraphAgentError as exc:
         print(
-            "LANGGRAPH AGENT ERROR:",
+            "PERSISTENT LANGGRAPH "
+            "AGENT ERROR:",
             str(exc),
         )
 
@@ -513,8 +596,7 @@ def run_langgraph_agent_investigation(
             ),
 
             detail=(
-                "LangGraph agent "
+                "Persistent LangGraph "
                 "investigation failed"
             ),
         ) from exc
-
