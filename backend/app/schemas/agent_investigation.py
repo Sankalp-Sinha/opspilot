@@ -157,3 +157,150 @@ class PersistentLangGraphInvestigationRead(
     ] = (
         "langgraph_postgres_checkpoint"
     )
+
+
+class PersistentThreadStateRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    thread_id: str
+
+    checkpoint_id: str | None
+
+    message_count: int
+
+    next_nodes: list[str]
+
+    steps_count: int
+
+    tool_calls_used: int
+
+    model_calls_count: int
+
+    node_trace: list[str]
+
+    final_answer_preview: str | None
+
+    stop_reason: str | None
+
+
+class CheckpointSummaryRead(
+    BaseModel
+):
+    checkpoint_id: str | None
+
+    parent_checkpoint_id: str | None
+
+    created_at: str | None
+
+    step: int | None
+
+    source: str | None
+
+    next_nodes: list[str]
+
+    message_count: int
+
+    steps_count: int
+
+    node_trace: list[str]
+
+    final_answer_preview: str | None
+
+    stop_reason: str | None
+
+
+class PersistentThreadHistoryRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    thread_id: str
+
+    checkpoint_count: int
+
+    checkpoints: list[
+        CheckpointSummaryRead
+    ]
+
+
+class PersistentLangGraphDrainRequest(
+    BaseModel
+):
+    goal: str = Field(
+        min_length=5,
+        max_length=1000,
+    )
+
+    thread_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+
+
+class PersistentLangGraphDrainRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    thread_id: str
+
+    drained: bool
+
+    drain_reason: str | None
+
+    checkpoint_id: str | None
+
+    message_count: int
+
+    next_nodes: list[str]
+
+    note: str
+
+
+class PersistentLangGraphResumeRequest(
+    BaseModel
+):
+    thread_id: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+
+class PersistentLangGraphResumeRead(
+    BaseModel
+):
+    incident_id: UUID
+
+    thread_id: str
+
+    checkpoint_id: str | None
+
+    message_count: int
+
+    next_nodes: list[str]
+
+    steps: list[
+        AgentToolStepRead
+    ]
+
+    tool_calls_count: int
+
+    model_calls_count: int
+
+    node_trace: list[str]
+
+    final_answer: str
+
+    stop_reason: Literal[
+        "model_finished",
+        "tool_budget_exhausted",
+    ]
+
+    model_name: str
+
+    harness: Literal[
+        "langgraph_resume_from_checkpoint"
+    ] = "langgraph_resume_from_checkpoint"

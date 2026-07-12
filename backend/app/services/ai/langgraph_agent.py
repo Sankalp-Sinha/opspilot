@@ -266,6 +266,11 @@ def _build_incident_graph(
         BaseCheckpointSaver
         | None
     ) = None,
+
+    interrupt_before: (
+        list[str]
+        | None
+    ) = None,
 ):
     model = get_ops_chat_model()
 
@@ -828,7 +833,8 @@ def _build_incident_graph(
 
 
     return builder.compile(
-        checkpointer=checkpointer
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
     )
 
 

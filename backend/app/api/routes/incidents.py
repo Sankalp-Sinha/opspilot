@@ -9,6 +9,12 @@ from fastapi import (
 from app.schemas.agent_investigation import (
     PersistentLangGraphInvestigationRead,
     PersistentLangGraphInvestigationRequest,
+    PersistentThreadStateRead,
+    PersistentThreadHistoryRead,
+    PersistentLangGraphDrainRequest,
+    PersistentLangGraphDrainRead,
+    PersistentLangGraphResumeRequest,
+    PersistentLangGraphResumeRead,
 )
 from app.services.ai.persistent_langgraph_agent import (
     PersistentLangGraphAgentError,
@@ -63,6 +69,17 @@ from app.services.ai.langchain_framework_agent import (
 from app.services.ai.langgraph_agent import (
     LangGraphAgentError,
     investigate_with_langgraph_agent,
+)
+from app.services.ai.langgraph_thread_inspector import (
+    LangGraphThreadInspectionError,
+    get_persistent_thread_history,
+    get_persistent_thread_state,
+)
+
+from app.services.ai.persistent_langgraph_recovery import (
+    PersistentLangGraphRecoveryError,
+    resume_persistent_langgraph_thread,
+    start_persistent_langgraph_drained_run,
 )
 
 
@@ -434,6 +451,215 @@ def run_langchain_agent_investigation(
             detail=(
                 "LangChain framework "
                 "agent investigation failed"
+            ),
+        ) from exc
+    
+
+@router.get(
+    "/{incident_id}/persistent-langgraph-threads/{thread_id}/state",
+
+    response_model=(
+        PersistentThreadStateRead
+    ),
+)
+def read_persistent_langgraph_thread_state(
+    incident_id: UUID,
+
+    thread_id: str,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Incident not found",
+        )
+
+    try:
+        return get_persistent_thread_state(
+            incident_id=incident.id,
+            thread_id=thread_id,
+        )
+
+    except LangGraphThreadInspectionError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=str(exc),
+        ) from exc
+    
+
+@router.get(
+    "/{incident_id}/persistent-langgraph-threads/{thread_id}/history",
+
+    response_model=(
+        PersistentThreadHistoryRead
+    ),
+)
+def read_persistent_langgraph_thread_history(
+    incident_id: UUID,
+
+    thread_id: str,
+
+    limit: int = 20,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Incident not found",
+        )
+
+    try:
+        return get_persistent_thread_history(
+            incident_id=incident.id,
+            thread_id=thread_id,
+            limit=limit,
+        )
+
+    except LangGraphThreadInspectionError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=str(exc),
+        ) from exc
+    
+
+@router.post(
+    "/{incident_id}/persistent-langgraph-agent-drain",
+
+    response_model=(
+        PersistentLangGraphDrainRead
+    ),
+)
+def drain_persistent_langgraph_investigation(
+    incident_id: UUID,
+
+    payload:
+        PersistentLangGraphDrainRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Incident not found",
+        )
+
+    try:
+        return start_persistent_langgraph_drained_run(
+            incident_id=incident.id,
+
+            title=incident.title,
+
+            description=(
+                incident.description
+            ),
+
+            service_name=(
+                incident.service_name
+            ),
+
+            goal=payload.goal,
+
+            thread_id=(
+                payload.thread_id
+            ),
+        )
+
+    except PersistentLangGraphRecoveryError as exc:
+        print(
+            "PERSISTENT LANGGRAPH "
+            "DRAIN ERROR:",
+            str(exc),
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "Persistent LangGraph "
+                "drain failed"
+            ),
+        ) from exc
+    
+
+@router.post(
+    "/{incident_id}/persistent-langgraph-agent-resume",
+
+    response_model=(
+        PersistentLangGraphResumeRead
+    ),
+)
+def resume_persistent_langgraph_investigation(
+    incident_id: UUID,
+
+    payload:
+        PersistentLangGraphResumeRequest,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+            detail="Incident not found",
+        )
+
+    try:
+        return resume_persistent_langgraph_thread(
+            incident_id=incident.id,
+
+            thread_id=(
+                payload.thread_id
+            ),
+        )
+
+    except PersistentLangGraphRecoveryError as exc:
+        print(
+            "PERSISTENT LANGGRAPH "
+            "RESUME ERROR:",
+            str(exc),
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=(
+                "Persistent LangGraph "
+                "resume failed"
             ),
         ) from exc
 
