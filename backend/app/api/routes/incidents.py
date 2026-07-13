@@ -6,6 +6,14 @@ from fastapi import (
     HTTPException,
     status,
 )
+from app.schemas.memory import (
+    IncidentMemoryListRead,
+    IncidentMemoryRead,
+)
+
+from app.services.ai.memory_service import (
+    list_service_memories,
+)
 from app.schemas.agent_investigation import (
     PersistentLangGraphInvestigationRead,
     PersistentLangGraphInvestigationRequest,
@@ -662,6 +670,83 @@ def resume_persistent_langgraph_investigation(
                 "resume failed"
             ),
         ) from exc
+    
+
+@router.get(
+    "/{incident_id}/memories",
+
+    response_model=(
+        IncidentMemoryListRead
+    ),
+)
+def list_incident_service_memories(
+    incident_id: UUID,
+
+    limit: int = 10,
+
+    db: Session = Depends(get_db),
+):
+    incident = db.get(
+        Incident,
+        incident_id,
+    )
+
+
+    if incident is None:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+            ),
+
+            detail="Incident not found",
+        )
+
+
+    if limit < 1 or limit > 50:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+
+            detail=(
+                "limit must be between 1 and 50"
+            ),
+        )
+
+
+    memories = list_service_memories(
+        db=db,
+
+        workspace_id=(
+            incident.workspace_id
+        ),
+
+        service_name=(
+            incident.service_name
+        ),
+
+        limit=limit,
+    )
+
+
+    return IncidentMemoryListRead(
+        incident_id=incident.id,
+
+        workspace_id=(
+            incident.workspace_id
+        ),
+
+        service_name=(
+            incident.service_name
+        ),
+
+        memories=[
+            IncidentMemoryRead.model_validate(
+                memory
+            )
+            for memory in memories
+        ],
+    )
 
 @router.get(
     "/{incident_id}",
@@ -787,6 +872,12 @@ def run_persistent_langgraph_investigation(
     try:
         return (
             investigate_with_persistent_langgraph_agent(
+                db=db,
+
+                workspace_id=(
+                    incident.workspace_id
+                ),
+
                 incident_id=incident.id,
 
                 title=incident.title,

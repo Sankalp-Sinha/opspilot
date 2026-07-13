@@ -3,6 +3,7 @@ from app.models.incident import Incident
 from app.models.incident_analysis import (
     IncidentAnalysis,
 )
+from app.models.incident_memory import IncidentMemory
 from app.models.workspace import Workspace
 
 

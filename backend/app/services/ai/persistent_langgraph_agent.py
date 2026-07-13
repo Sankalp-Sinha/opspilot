@@ -9,6 +9,20 @@ from langchain.messages import (
     HumanMessage,
     SystemMessage,
 )
+from sqlalchemy.orm import Session
+
+from app.schemas.memory import (
+    IncidentMemoryRead,
+)
+
+from app.services.ai.memory_service import (
+    format_memories_for_prompt,
+    list_service_memories,
+)
+
+from app.services.ai.memory_writer import (
+    maybe_write_investigation_memory,
+)
 
 from app.core.config import (
     settings,
@@ -72,6 +86,7 @@ def _build_first_turn_prompt(
     *,
     incident_payload: dict[str, str],
     goal: str,
+    memory_context: str | None = None,
 ) -> str:
     return (
         "Investigate the stored incident and pursue "
@@ -86,6 +101,18 @@ def _build_first_turn_prompt(
 
         "\n\n"
 
+        "LONG_TERM_SERVICE_MEMORY:\n"
+
+        f"{memory_context or 'No durable long-term service memories are currently stored.'}"
+
+        "\n\n"
+
+        "Memory rules:\n"
+        "1. Use long-term memory only if relevant.\n"
+        "2. Live tool evidence is stronger than old memory.\n"
+        "3. Do not treat memory as guaranteed truth.\n"
+        "4. If memory is enough for the goal, avoid unnecessary tools.\n\n"
+
         "INVESTIGATION_GOAL:\n"
 
         f"{goal}"
@@ -95,25 +122,36 @@ def _build_first_turn_prompt(
 def _build_follow_up_prompt(
     *,
     goal: str,
+    memory_context: str | None = None,
 ) -> str:
     return (
         "Continue the same incident investigation "
         "using relevant evidence and conclusions "
         "already present in this thread.\n\n"
 
+        "LONG_TERM_SERVICE_MEMORY:\n"
+
+        f"{memory_context or 'No durable long-term service memories are currently stored.'}"
+
+        "\n\n"
+
+        "Memory rules:\n"
+        "1. Use long-term memory only if relevant.\n"
+        "2. Live tool evidence in this thread is stronger than old memory.\n"
+        "3. Do not repeat an earlier tool call merely "
+        "to rediscover evidence already available.\n"
+        "4. Call a tool only when the new goal requires additional evidence.\n\n"
+
         "NEW_INVESTIGATION_GOAL:\n"
 
-        f"{goal}\n\n"
-
-        "Do not repeat an earlier tool call merely "
-        "to rediscover evidence already available "
-        "in the thread. Call a tool only when the "
-        "new goal requires additional evidence."
+        f"{goal}"
     )
 
 
 def investigate_with_persistent_langgraph_agent(
     *,
+    db: Session,
+    workspace_id: UUID,
     incident_id: UUID,
     title: str,
     description: str,
@@ -132,6 +170,17 @@ def investigate_with_persistent_langgraph_agent(
             else "unknown"
         ),
     }
+    service_memories = list_service_memories(
+        db=db,
+        workspace_id=workspace_id,
+        service_name=service_name,
+        limit=5,
+    )
+
+
+    memory_context = format_memories_for_prompt(
+        service_memories
+    )
 
 
     resolved_thread_id = (
@@ -196,7 +245,10 @@ def investigate_with_persistent_langgraph_agent(
                     HumanMessage(
                         content=(
                             _build_follow_up_prompt(
-                                goal=goal
+                                goal=goal,
+                                memory_context=(
+                                    memory_context
+                                ),
                             )
                         )
                     )
@@ -212,12 +264,16 @@ def investigate_with_persistent_langgraph_agent(
 
                     HumanMessage(
                         content=(
-                            _build_first_turn_prompt(
+                           _build_first_turn_prompt(
                                 incident_payload=(
                                     incident_payload
                                 ),
 
                                 goal=goal,
+
+                                memory_context=(
+                                    memory_context
+                                ),
                             )
                         )
                     ),
@@ -322,6 +378,46 @@ def investigate_with_persistent_langgraph_agent(
                     "checkpoint_id"
                 )
             )
+            checkpoint_id_text = (
+                str(checkpoint_id)
+                if checkpoint_id
+                else None
+            )
+
+
+            memory_written = (
+                maybe_write_investigation_memory(
+                    db=db,
+
+                    workspace_id=(
+                        workspace_id
+                    ),
+
+                    incident_id=(
+                        incident_id
+                    ),
+
+                    service_name=(
+                        service_name
+                    ),
+
+                    goal=goal,
+
+                    steps=result["steps"],
+
+                    final_answer=(
+                        final_answer
+                    ),
+
+                    source_thread_id=(
+                        resolved_thread_id
+                    ),
+
+                    source_checkpoint_id=(
+                        checkpoint_id_text
+                    ),
+                )
+            )
 
 
             return (
@@ -337,8 +433,21 @@ def investigate_with_persistent_langgraph_agent(
                     ),
 
                     checkpoint_id=(
-                        str(checkpoint_id)
-                        if checkpoint_id
+                        checkpoint_id_text
+                    ),
+
+                    memories_used=[
+                        IncidentMemoryRead.model_validate(
+                            memory
+                        )
+                        for memory in service_memories
+                    ],
+
+                    memory_written=(
+                        IncidentMemoryRead.model_validate(
+                            memory_written
+                        )
+                        if memory_written
                         else None
                     ),
 

@@ -4,6 +4,10 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from typing import Literal
 
+from app.schemas.memory import (
+    IncidentMemoryRead,
+)
+
 
 AgentStopReason = Literal[
     "model_finished",
@@ -151,6 +155,14 @@ class PersistentLangGraphInvestigationRead(
     ]
 
     model_name: str
+    
+    memories_used: list[
+        IncidentMemoryRead
+    ] = []
+
+    memory_written: (
+        IncidentMemoryRead | None
+    ) = None
 
     harness: Literal[
         "langgraph_postgres_checkpoint"
